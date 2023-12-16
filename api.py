@@ -38,7 +38,6 @@ def recommend_lawyer(user_name, legal_needs, location, availability, experience_
         'budget_constraints': budget_constraints
     }
 
-
     # Ranking criteria for features of the modelkey: int
     # 1. area of expertise and location 
     # 2. fee structure and years of experience
@@ -47,7 +46,7 @@ def recommend_lawyer(user_name, legal_needs, location, availability, experience_
     similarity_dict = {}
     weights = {
         "name": 0, 
-        "area_of_expertise": 6, 
+        "area_of_expertise": 10, 
         "location": 4, 
         "availability": 1, 
         "years_of_experience": 3, 
@@ -73,11 +72,10 @@ def recommend_lawyer(user_name, legal_needs, location, availability, experience_
             
             if isinstance(lsp_feature, (np.int64, np.float64, int)):
                 # Calculate distance
-                distance = (lsp_feature - user_feature)
-                
-                # map it to range (-1, 1) with sigmoid
-                mapped_distance = math.tanh(distance)
-                similarity += weights[lsp_col] * mapped_distance
+                sigma = 5000.0
+                # Gassian curve. Recommend highly when difference is close to zero
+                similarity_score = math.exp(-((user_feature - lsp_feature)**2) / (2 * sigma**2))
+                similarity += weights[lsp_col] * similarity_score
             
             else:
                 similarity += weights[lsp_col] * util.pytorch_cos_sim(lsp_feature, user_feature).item()
@@ -90,8 +88,8 @@ def recommend_lawyer(user_name, legal_needs, location, availability, experience_
 
     return recommended_ids_sorted
 
-sorted_dict = recommend_lawyer("Rishab", "Criminal Defense","Hyderabad","Part-time",1.0,"Malayalam",44973)
-print(sorted_dict)
+# sorted_dict = recommend_lawyer("Rishab", "Criminal Defense","Hyderabad","Part-time",1.0,"Malayalam",44973)
+# print(sorted_dict)
 
 
 class RecommendationRequest(BaseModel):
