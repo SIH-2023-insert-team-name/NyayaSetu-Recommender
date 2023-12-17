@@ -6,9 +6,6 @@ Pillow==10.1.0
 pydantic==2.5.2
 sentence-transformers==2.2.2
 tokenizers==0.15.0
-torch==2.1.2
-torchvision==0.16.2
 tqdm==4.66.1
 transformers==4.36.1
 uvicorn==0.24.0.post1
-gunicorn==19.7.1
