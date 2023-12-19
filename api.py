@@ -8,12 +8,22 @@ import pickle
 import uvicorn
 import requests
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List
 from sentence_transformers import SentenceTransformer, util
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 torch.device('cpu')
 
 def process_lawyer_list(df_lsp_transf):
@@ -47,20 +57,58 @@ def process_lawyer_list(df_lsp_transf):
 
     # Encode the location into latitude and longitude
     df_lsp_transf['location'] = df_lsp_transf['location'].apply(lambda location: 
-                                                                lat_long_mapping[location])
+                                                                lat_long_mapping.get(location, get_lat_long(location)))
     
     # Save the loaded PyTorch object to a Pickle file using pickle.dump
     with open('./intermediate_files/df_lsp_transf.pkl', 'wb') as fp:
         pickle.dump(df_lsp_transf, fp)
-    
-def check_double_quotes(my_string):
-# Check if the string has double quotes around it
-    if my_string.startswith('"') and my_string.endswith('"'):
-        True
-    else:
-        False
 
-def recommend_lawyer(user_name, legal_needs, location, availability, experience_level, preferred_language, budget_constraints):
+def get_lat_long(location):
+    # Define the URL for the Nominatim API request with your string address
+    # address = "Bangalore"
+    encoded_address = requests.utils.quote(location)  # URL encode the address
+    url = f"https://nominatim.openstreetmap.org/search?q={encoded_address}&format=json"
+
+    # Make the GET request
+    response = requests.get(url)
+
+    # Check if the request was successful (HTTP status code 200)
+    if response.status_code == 200:
+        data = response.json()
+        # Process the response data to extract latitude and longitude
+        if len(data) > 0:
+            lat = data[0]['lat']
+            lon = data[0]['lon']
+        else:
+            print("Location not found.")
+    else:
+        print("Error: Unable to retrieve data from Nominatim API.")
+
+    # Append the result to the pickle file
+    with open('lat_long_mapping.pkl', 'ab') as file:
+        pickle.dump({location: (float(lat), float(lon))}, file)
+
+    return float(lat), float(lon)
+
+# def save_lat_long(df_lsp):
+#     lat_long_mapping = {}
+
+#     for city in set(df_lsp['location']):
+#         lat_long_mapping[city] = get_lat_long(city)
+        
+#     with open('./intermediate_files/lat_long_mapping.pkl', 'wb') as fp:
+#         pickle.dump(lat_long_mapping, fp)
+#         print('dictionary saved successfully to file')
+
+    
+# def check_double_quotes(my_string):
+# # Check if the string has double quotes around it
+#     if my_string.startswith('"') and my_string.endswith('"'):
+#         True
+#     else:
+#         False
+
+def recommend_lawyer(legal_needs, location, availability, experience_level, preferred_language, budget_constraints):
     # Read dictionary pkl file
     with open('./intermediate_files/lat_long_mapping.pkl', 'rb') as fp:
         lat_long_mapping = pickle.load(fp)
@@ -76,9 +124,6 @@ def recommend_lawyer(user_name, legal_needs, location, availability, experience_
     location = lat_long_mapping[location]
     availability = (1 if availability == "Full-time" else 0)
     preferred_language = model.encode(preferred_language, convert_to_tensor=True)
-
-    # Read encoded lawyer database
-    # df_lsp_transf = pd.read_csv('./data/transformed_lsp_profiles.csv')
 
     user_dict = {
         # 'name': user_name,
@@ -113,11 +158,11 @@ def recommend_lawyer(user_name, legal_needs, location, availability, experience_
             lsp_feature = df_lsp_transf.iloc[index][lsp_col]
             user_feature = user_dict[user_col]
             
-            if lsp_col not in weights.keys() or lsp:
+            if lsp_col not in weights.keys():
                 continue
 
-            if check_double_quotes(lsp_feature):
-                lsp_feature = ast.literal_eval(lsp_feature)
+            # if check_double_quotes(lsp_feature):
+            #     lsp_feature = ast.literal_eval(lsp_feature)
 
             if isinstance(lsp_feature, tuple):
                 lsp_feature = lsp_feature
@@ -137,7 +182,7 @@ def recommend_lawyer(user_name, legal_needs, location, availability, experience_
             
             else:
                 similarity += weights[lsp_col] * util.pytorch_cos_sim(lsp_feature, user_feature).item()
-        
+
         unique_id = df_lsp_transf.loc[index, "_id"]
         similarity_dict[unique_id] = similarity
 
@@ -163,9 +208,9 @@ class RecommendationResponse(BaseModel):
 @app.post("/recommend_lawyer")
 async def recommend_lawyer_endpoint(request: RecommendationRequest):
     # try:
-        # Call your recommendation function with the provided parameters
+    # Call your recommendation function with the provided parameters
     recommended_lawyer = recommend_lawyer(
-        request.user_name,
+        # request.user_name,
         request.legal_needs,
         request.location,
         request.availability,
@@ -177,7 +222,7 @@ async def recommend_lawyer_endpoint(request: RecommendationRequest):
     return RecommendationResponse(recommendations=recommended_lawyer)
     
     # except Exception as e:
-    #     raise HTTPException(status_code=500, detail=str(e))
+    # raise HTTPException(status_code=500, detail=str(e))
 
 # Assume your existing GET endpoint is hosted at this URL
 get_lawyer_url = "https://nyayasetu-backend.onrender.com/get/lawyers"
@@ -191,9 +236,8 @@ async def process_and_store_lawyers():
     if response.status_code == 200:
         # Your logic to process the data and store it in an intermediate file
         lawyer_list = response.json()
-        lawyer_df_transformed = pd.DataFrame(lawyer_list)
-        print(lawyer_df_transformed)
-        process_lawyer_list(lawyer_df_transformed)
+        lsp_df = pd.DataFrame(lawyer_list)
+        process_lawyer_list(lsp_df)
 
         return {"message": "Data processed and stored successfully"}
 
